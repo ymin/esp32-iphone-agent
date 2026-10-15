@@ -37,11 +37,13 @@ def changed(before: bytes | None, after: bytes | None, ignore: tuple = (), thres
 
 def pointer(before: bytes, after: bytes, near: tuple[float, float], shift: float,
             reach: tuple[float, float] = (0.12, 0.08)) -> tuple[float, float] | None:
-    """Where the pointer is in `before`, given it moved right by `shift` (fraction of width) in `after`.
+    """Where the pointer is in `before`, given it was nudged sideways (right if `shift` > 0) in `after`.
 
     Only the pointer moved between the two frames, so the changed pixels within `reach` of `near` are the
-    pointer at both spots; their centroid sits shift/2 to the right of the first one. None if unclear:
-    nothing moved, or the change is too big or too spread out to be one small pointer.
+    pointer at both spots. The nudge is horizontal, so their height is the pointer's diameter and their
+    trailing edge is the pointer's edge in `before`; this holds however far the nudge really went, which
+    depends on the pointer speed. None if unclear: nothing moved, or the change is too big or too spread
+    out to be one small pointer.
     """
     a, b = _gray(before), _gray(after)
     if a.size != b.size:
@@ -55,9 +57,14 @@ def pointer(before: bytes, after: bytes, near: tuple[float, float], shift: float
     hits = [(i % bw, i // bw) for i, v in enumerate(diff) if v > 30]
     if not 15 <= len(hits) <= len(diff) // 4:  # nothing moved, or much more than a pointer
         return None
+    # A blinking text cursor also changes a few pixels; the moving pointer changes far more, so keep the changes
+    # around the median one.
+    mx, my = sorted(x for x, _ in hits)[len(hits) // 2], sorted(y for _, y in hits)[len(hits) // 2]
+    hits = [(x, y) for x, y in hits if abs(x - mx) <= 0.25 * w and abs(y - my) <= 0.07 * h]
     xs, ys = [x for x, _ in hits], [y for _, y in hits]
-    if max(xs) - min(xs) > 0.15 * w or max(ys) - min(ys) > 0.07 * h:  # not one compact spot
+    if max(xs) - min(xs) > 0.25 * w or max(ys) - min(ys) > 0.07 * h:  # not one compact spot
         return None
-    cx = sum(x for x, _ in hits) / len(hits) + left
+    radius = (max(ys) - min(ys) + 1) / 2
+    cx = (min(xs) + radius if shift > 0 else max(xs) + 1 - radius) + left
     cy = sum(y for _, y in hits) / len(hits) + top
-    return cx / w - shift / 2, cy / h
+    return cx / w, cy / h

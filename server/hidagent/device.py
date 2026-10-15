@@ -1,6 +1,7 @@
 """TCP link to the HID bridge board (see firmware/hid_bridge)."""
 
 import asyncio
+import hmac
 import logging
 import time
 
@@ -14,7 +15,8 @@ class DeviceError(RuntimeError):
 class Device:
     """Accepts one board connection and sends it commands, one at a time."""
 
-    def __init__(self):
+    def __init__(self, token: str | None = None):
+        self._token = token  # when set, a board must greet with it: the port may be reachable from the internet
         self._reader = self._writer = None
         self._lock = asyncio.Lock()
         self._last = self._beat = 0.0
@@ -28,17 +30,25 @@ class Device:
         return await asyncio.start_server(self._accept, host, port)
 
     async def _accept(self, reader, writer):
-        # newer firmware greets with "hello <last reset reason> <uptime ms>": read it before any command
+        # newer firmware greets with "hello <last reset reason> <uptime ms> [token]": read it before any command.
+        # A board with a token may come through a tunnel that opens the link before its TLS handshake is done.
         try:
-            hello = (await asyncio.wait_for(reader.readline(), 1)).decode().strip()
+            line = await asyncio.wait_for(reader.readline(), 10 if self._token else 1)
+            hello = line.decode(errors="replace").split()
         except (OSError, asyncio.TimeoutError):
-            hello = ""
+            hello = []
+        peer = writer.get_extra_info("peername")
+        if self._token and not (len(hello) == 4 and hello[0] == "hello"
+                                and hmac.compare_digest(hello[3].encode(), self._token.encode())):
+            log.warning("connection from %s refused: no valid board token", peer)
+            writer.close()
+            return
         if self.connected:
             self._writer.close()
         self._reader, self._writer = reader, writer
         self.links += 1
         self._last = self._beat = time.time()  # fresh link: nothing to keep awake yet
-        log.info("board connected from %s %s", writer.get_extra_info("peername"), hello)
+        log.info("board connected from %s %s", peer, " ".join(hello[:3]))
 
     async def wait_connected(self, timeout: float) -> bool:
         deadline = time.time() + timeout
@@ -55,6 +65,9 @@ class Device:
             return 5 + max(abs(int(n)) for n in arg.split()) / 10 * 0.012
         if name == "type":
             return 5 + 0.1 * len(arg)
+        if name == "stroke":  # stroke <hold ms> <x> <y> [<x> <y> <glide ms>]...
+            numbers = [int(n) for n in arg.split()]
+            return 5 + (numbers[0] + sum(numbers[5::3])) / 1000
         if name == "ping":
             return 8  # an idle check: tolerate a Wi-Fi hiccup rather than drop a healthy board
         return 5

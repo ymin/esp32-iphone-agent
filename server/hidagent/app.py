@@ -21,7 +21,7 @@ DATA_DIR = Path(os.environ.get("HIDAGENT_DATA", Path.home() / ".hidagent"))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 DEBUG = os.environ.get("HIDAGENT_DEBUG") == "1"
 
-device = Device()
+device = Device(os.environ.get("BOARD_TOKEN") or None)
 screen = Screen(os.environ.get("AIRPLAY_NAME", "iPhone Agent"))
 phone = Phone(device, DATA_DIR / "calibration.json", screen)
 agent = Agent(phone, screen, LLM.from_env("ACTOR"), LLM.from_env("PLANNER"),
@@ -109,7 +109,7 @@ def step_shot(index: int):
 
 @app.post("/api/tap")
 async def tap(p: Point):
-    return await act(phone.tap(p.x, p.y))
+    return await act(phone.tap(p.x, p.y, aim=True))  # a person tapping expects the exact spot; worth ~1 s
 
 
 @app.post("/api/swipe")
@@ -160,9 +160,12 @@ async def calibrate_start():
 
 
 @app.post("/api/calibrate/finish")
-def calibrate_finish(p: Point):
-    phone.finish_calibration(p.x, p.y)
-    return {"ok": True, "span": phone.span}
+async def calibrate_finish(p: Point):
+    """The user clicked the pointer. {"done": false}: another spot needs a click too."""
+    try:
+        return {"ok": True, "done": await phone.finish_calibration(p.x, p.y), "span": phone.span}
+    except (DeviceError, RuntimeError) as e:
+        raise HTTPException(409, str(e)) from e
 
 
 @app.post("/api/agent")

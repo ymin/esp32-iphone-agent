@@ -175,8 +175,13 @@ live.addEventListener("pointerup", async (e) => {
   down = null;
   if (calibrating) {
     calibrating = false;
-    const ok = await post("/api/calibrate/finish", up);
-    calibrationHint(ok ? "calOk" : null);
+    calibrationHint("calFinding");
+    const r = await post("/api/calibrate/finish", up);
+    if (r && !r.done) {  // the next spot needs a click as well
+      calibrating = true;
+      return calibrationHint("calNow");
+    }
+    calibrationHint(r ? "calOk" : null);
   } else if (Math.hypot(up.x - from.x, up.y - from.y) < 0.02) {
     post("/api/tap", up);
   } else {

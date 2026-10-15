@@ -8,14 +8,16 @@ from hidagent.vision import changed, pointer
 W, H = 498, 1080  # a mirrored iPhone frame
 
 
-def screen(pointer_at=None, button=False) -> bytes:
-    """A synthetic home screen: gradient background, optional button and pointer dot."""
+def screen(pointer_at=None, button=False, caret=False) -> bytes:
+    """A synthetic home screen: gradient background, optional button, text cursor and pointer dot."""
     img = Image.new("RGB", (W, H))
     draw = ImageDraw.Draw(img)
     for y in range(H):
         draw.line([(0, y), (W, y)], fill=(40, 60 + y // 10, 120))
     if button:
         draw.rectangle([150, 400, 350, 600], fill=(250, 250, 250))
+    if caret:
+        draw.rectangle([33, 170, 35, 196], fill=(230, 170, 0))
     if pointer_at:
         x, y = pointer_at
         draw.ellipse([x - 12, y - 12, x + 12, y + 12], fill=(200, 200, 200))
@@ -42,6 +44,23 @@ def test_pointer_is_found_from_a_nudge():
     assert found is not None
     assert found[0] * W == pytest.approx(262, abs=3)
     assert found[1] * H == pytest.approx(856, abs=3)
+
+
+def test_pointer_is_found_after_a_nudge_much_larger_than_assumed():
+    # a fast (Bluetooth) pointer: the nudge carries it about 64 px, though only 12 / W was expected
+    found = pointer(screen((212, 213)), screen((276, 213)), near=(0.5, 0.5), shift=12 / W, reach=(0.5, 0.5))
+    assert found is not None
+    assert found[0] * W == pytest.approx(212, abs=3)
+    assert found[1] * H == pytest.approx(213, abs=3)
+
+
+def test_pointer_is_found_while_a_text_cursor_blinks():
+    # the cursor of a text field blinks off between the two frames, far from the pointer
+    found = pointer(screen((186, 183), caret=True), screen((250, 183)), near=(0.5, 0.5), shift=12 / W,
+                    reach=(0.5, 0.5))
+    assert found is not None
+    assert found[0] * W == pytest.approx(186, abs=3)
+    assert found[1] * H == pytest.approx(183, abs=3)
 
 
 def test_pointer_not_found_when_nothing_moved():
