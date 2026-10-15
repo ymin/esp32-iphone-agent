@@ -9,6 +9,7 @@ port() { for p in /dev/cu.usbmodem* /dev/ttyACM*; do [[ -e $p ]] && { echo "$p";
 PORT=${1:-$(port)}
 FLAGS=(--build-property "compiler.cpp.extra_flags="); [[ "${2:-}" == --debug ]] && FLAGS=(--build-property "compiler.cpp.extra_flags=-DDEBUG_SERIAL=1")
 
+arduino-cli lib install "NimBLE-Arduino@2.5.1" >/dev/null
 arduino-cli compile -b "$FQBN" "${FLAGS[@]}" --output-dir build hid_bridge
 OLD=$PORT
 stty -f "$PORT" 1200 2>/dev/null || stty -F "$PORT" 1200 2>/dev/null || true
