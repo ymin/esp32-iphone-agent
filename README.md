@@ -21,8 +21,8 @@ English · [简体中文](README.zh-CN.md)
 
 **Example 2 — set an alarm.** *"Set an alarm for 7:00 AM that repeats every day, then save it"*: the agent opens Clock, types 0700 into the time wheel, ticks the days under Repeat several taps at a time, and saves. Left: the real iPhone with the ESP32 plugged in; right: the web UI.
 
-The agent sees the phone through AirPlay screen mirroring and touches it through a tiny ESP32-S3 board that
-plugs into the phone's USB port as a mouse and keyboard. Any OpenAI-compatible vision model can be the brain —
+The agent sees the phone through AirPlay screen mirroring and touches it through a tiny ESP32-S3 board that acts
+as a mouse and keyboard, plugged into the phone's USB port or paired over Bluetooth. Any OpenAI-compatible vision model can be the brain —
 a cloud API, or a model you run yourself.
 
 ## Why
@@ -45,7 +45,8 @@ uses the same paths a person uses — the screen and a pointer — so the phone 
 
 - **Eyes — AirPlay mirroring.** The phone mirrors its screen to [UxPlay](https://github.com/FDH2/UxPlay) running
   on your computer; a GStreamer pipeline turns the stream into JPEG frames for the agent and the web page.
-- **Hands — a USB HID bridge.** An ESP32-S3 plugged into the phone shows up as a standard USB mouse and keyboard.
+- **Hands — a HID bridge.** An ESP32-S3 plugged into the phone, or paired with it over Bluetooth LE, shows up as a
+  standard mouse and keyboard.
   With iOS AssistiveTouch on, the mouse moves an on-screen pointer, so a click is a tap and a drag is a swipe.
   The board connects to the computer over Wi-Fi and executes simple line commands (`move`, `click`, `type`, …);
   all logic stays on the computer.
@@ -62,7 +63,7 @@ uses the same paths a person uses — the screen and a pointer — so the phone 
 | Part | Notes |
 |---|---|
 | **ESP32-S3 board** | Tested with a bare [Seeed Studio XIAO ESP32S3](https://wiki.seeedstudio.com/xiao_esp32s3_getting_started/) (~$7, no camera add-on needed); attach the antenna that comes with it, as the XIAO has no on-board antenna and Wi-Fi drops often without it. Any ESP32-S3 board whose USB-C port is wired to the S3's native USB works. |
-| **iPhone** | USB-C models plug in directly. Lightning models need a Lightning to USB Camera Adapter. The phone powers the board. |
+| **iPhone** | USB-C models plug in directly. Lightning models need a Lightning to USB Camera Adapter. The phone powers the board. Or pair the board over Bluetooth instead; it then needs its own power (a USB charger or power bank). |
 | **Computer** | macOS or Linux, on the same network as the phone; runs UxPlay and the server. |
 | **Vision model** | Any OpenAI-compatible chat API that accepts images. Running a model locally is optional. |
 
@@ -83,7 +84,8 @@ Use a USB-C hub with power pass-through if the phone should keep charging while 
 
 ### 1. Flash the board
 
-Install [arduino-cli](https://arduino.github.io/arduino-cli/) and the ESP32 core (3.x), then:
+Install [arduino-cli](https://arduino.github.io/arduino-cli/) and the ESP32 core (3.x), then (the script also installs the
+[NimBLE-Arduino](https://github.com/h2zero/NimBLE-Arduino) library for Bluetooth):
 
 ```bash
 cp hardware/hid_bridge/secrets.example.h hardware/hid_bridge/secrets.h
@@ -111,9 +113,14 @@ Open `http://<computer-ip>:8890` in a browser.
 
 1. **Settings → Accessibility → Touch → AssistiveTouch**: turn it on.
 2. Plug the board into the phone. A round pointer appears; the web page shows *controller connected*.
+   For Bluetooth instead, power the board and pair **HID Bridge** in **Settings → Bluetooth** (no PIN).
+   Then set **Settings → General → Trackpad & Mouse → Tracking Speed** to the slowest setting: over Bluetooth the
+   pointer is much faster than over USB.
 3. **Control Center → Screen Mirroring → iPhone Agent**. The live screen appears in the web page.
-4. In the web page, open **Manual controls → Calibrate**. The server moves the pointer, finds it on the live screen
-   and calibrates itself in a few seconds; if it cannot see the pointer, it asks you to click exactly on it.
+4. In the web page, open **Manual controls → Calibrate**. The server moves the pointer to five spots spread over the
+   screen, finds it on the live screen at each and fits the mapping through all of them in about half a minute.
+   Wherever it cannot see the pointer, it asks you to click exactly on it, then carries on.
+   Calibrate on a screen without icons, such as an empty note: icons under the pointer light up and hide it.
 
 ### 4. Give it a task
 
@@ -122,6 +129,7 @@ Type a goal (for example *"Open Settings and go to Wi-Fi"*) and press **Start**,
 ## Web UI
 
 - **Live phone** — click to tap, drag to swipe, scroll to scroll; manual Home, Back, typing and keys.
+  A click finds the pointer and corrects it before tapping, so it lands where you clicked (about a second slower).
 - **Live log** — every plan, thought and action as it happens, with timings.
 - **Step wall** — the screenshot the model decided on for every step, with its tap or swipe drawn on top, plus the
   model's reasoning and how long thinking and acting took. Click a card to zoom in.
@@ -192,9 +200,15 @@ command per line over TCP and the board answers `ok` or `err <reason>`.
 | `type <text>` | Type ASCII text |
 | `key <combo>` | Press keys, e.g. `enter`, `cmd+h`, `cmd+space` |
 
+Input goes to a phone paired over Bluetooth while one is connected, and over USB otherwise.
+If the board is powered from a computer and Bluetooth drops, input goes to that computer, so power it from a charger
+when using Bluetooth.
+A Bluetooth report the radio could not send is retried, and if it still fails the command answers
+`err bluetooth dropped <n> reports`, because the pointer then is not where the server thinks.
+
 If the Wi-Fi link drops, the board releases all buttons and reconnects on its own. While the phone is locked, its USB
-port sleeps: the board then tries to wake it and otherwise answers `err phone usb asleep` instead of waiting. A watchdog
-restarts the board if it ever stops responding.
+port sleeps: the board then tries to wake it and otherwise answers `err phone not connected` instead of waiting. A
+watchdog restarts the board if it ever stops responding.
 
 ## Project layout
 
